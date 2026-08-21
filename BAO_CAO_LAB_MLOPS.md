@@ -4,7 +4,7 @@
 **Buổi học:** Day 21 - CI/CD cho AI Systems  
 **Học viên:** Phạm Quốc Thanh — **Mã học viên:** 2A202601407  
 **GitHub Repository:** [https://github.com/ShayNeeo/TRACK2-Day21-2A202601407-PhamQuocThanh](https://github.com/ShayNeeo/TRACK2-Day21-2A202601407-PhamQuocThanh)  
-**Inference Server:** `http://sgp1.w9.nu:8000` (SSH: `sgp1.w9.nu:2205`)  
+**Inference Server:** `https://day21.w9.nu` (IPv4 & IPv6 via Cloudflare Proxy — SSH: `sgp1.w9.nu:2205`)  
 **Cloud Storage:** Oracle Cloud Infrastructure S3 Object Storage (`AIinAction` Bucket, Region `ap-singapore-1`)
 
 ---

@@ -292,7 +292,6 @@ jobs:
           script: |
             echo "Deploying latest model on VM..."
             sudo systemctl restart mlops-serve || systemctl restart mlops-serve
-            sleep 5
-            curl -sf http://localhost:8000/health && echo "Health check passed." || exit 1
+            curl -sf http://localhost/health || curl -sf http://localhost:8000/health && echo "Health check passed." || exit 1
 
 

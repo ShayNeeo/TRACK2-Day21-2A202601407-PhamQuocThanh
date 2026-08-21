@@ -124,4 +124,7 @@ def predict(req: PredictRequest):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    host = os.environ.get("HOST", "::")
+    port = int(os.environ.get("PORT", "80"))
+    print(f"[SERVE] Starting server on [{host}]:{port} (IPv4 + IPv6 dual-stack)")
+    uvicorn.run(app, host=host, port=port)

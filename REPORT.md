@@ -10,7 +10,7 @@
 | **Học viên** | **Phạm Quốc Thanh** |
 | **Mã học viên** | **2A202601407** |
 | **GitHub Repository** | [https://github.com/ShayNeeo/TRACK2-Day21-2A202601407-PhamQuocThanh](https://github.com/ShayNeeo/TRACK2-Day21-2A202601407-PhamQuocThanh) |
-| **Inference Server (VM)** | `http://sgp1.w9.nu:8000` (SSH: `sgp1.w9.nu:2205`) |
+| **Inference Server (Public URL)** | `https://day21.w9.nu` (IPv4 & IPv6 via Cloudflare Proxy) — Direct SSH: `sgp1.w9.nu:2205` |
 | **Cloud Object Storage** | Oracle Cloud Infrastructure (OCI) S3 Storage (`AIinAction` Bucket, Region `ap-singapore-1`) |
 | **Tổng điểm tự đánh giá** | **100 / 100 Điểm** (80/80 Điểm Core + 20/20 Điểm Bonus 1–5) |
 
