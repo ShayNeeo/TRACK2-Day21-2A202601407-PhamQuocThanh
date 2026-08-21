@@ -4,10 +4,12 @@ on:
   push:
     branches: [main]
     paths:
+      - 'data/*.dvc'
       - 'data/**.dvc'
       - 'src/**.py'
       - 'params.yaml'
   workflow_dispatch:
+
 
 jobs:
 
