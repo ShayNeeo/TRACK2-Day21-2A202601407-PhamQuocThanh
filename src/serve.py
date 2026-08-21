@@ -1,41 +1,75 @@
+import os
+import joblib
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from google.cloud import storage
-import joblib
-import os
 
-app = FastAPI()
+app = FastAPI(title="MLOps Wine Quality Inference Service")
 
-GCS_BUCKET = os.environ["GCS_BUCKET"]
-GCS_MODEL_KEY = "models/latest/model.pkl"
-MODEL_PATH = os.path.expanduser("~/models/model.pkl")
+GCS_BUCKET = os.environ.get("GCS_BUCKET") or os.environ.get("CLOUD_BUCKET") or os.environ.get("S3_BUCKET", "")
+MODEL_KEY = "models/latest/model.pkl"
+MODEL_PATH = os.path.expanduser(os.environ.get("MODEL_LOCAL_PATH", "~/models/model.pkl"))
+FALLBACK_LOCAL_PATH = "models/model.pkl"
 
 
 def download_model():
     """
-    Tai file model.pkl tu GCS ve may khi server khoi dong.
-
-    Ham nay duoc goi mot lan khi module duoc import. Su dung
-    GOOGLE_APPLICATION_CREDENTIALS de xac thuc (duoc dat trong systemd service).
+    Tai file model.pkl tu Cloud Storage (S3 / OCI / GCS) ve may khi server khoi dong.
+    Neu khong co bien moi truong Cloud hoac da co model cuc bo, su dung file cuc bo.
     """
-    # TODO 1: Tao storage.Client()
-    # client = storage.Client()
+    os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
 
-    # TODO 2: Lay bucket va blob tuong ung
-    # bucket = client.bucket(GCS_BUCKET)
-    # blob   = bucket.blob(GCS_MODEL_KEY)
+    # 1. Thu tai tu S3 / OCI Object Storage (neu co boto3 va AWS credentials/endpoint)
+    s3_endpoint = os.environ.get("AWS_ENDPOINT_URL") or os.environ.get("S3_ENDPOINT_URL")
+    aws_access_key = os.environ.get("AWS_ACCESS_KEY_ID")
+    aws_secret_key = os.environ.get("AWS_SECRET_ACCESS_KEY")
 
-    # TODO 3: Tai file model xuong may
-    # blob.download_to_filename(MODEL_PATH)
+    if GCS_BUCKET and (aws_access_key or s3_endpoint):
+        try:
+            import boto3
+            session = boto3.session.Session()
+            s3_client = session.client(
+                "s3",
+                endpoint_url=s3_endpoint,
+                aws_access_key_id=aws_access_key,
+                aws_secret_access_key=aws_secret_key,
+                region_name=os.environ.get("AWS_REGION", "us-east-1"),
+            )
+            s3_client.download_file(GCS_BUCKET, MODEL_KEY, MODEL_PATH)
+            print(f"[SERVE] Model downloaded successfully from S3/OCI (bucket: {GCS_BUCKET}) to {MODEL_PATH}")
+            return
+        except Exception as e:
+            print(f"[SERVE] S3 download attempt failed: {e}")
 
-    # TODO 4: In thong bao thanh cong
-    # print("Model da duoc tai xuong tu GCS.")
+    # 2. Thu tai tu Google Cloud Storage (neu co GCS)
+    if GCS_BUCKET and os.environ.get("GOOGLE_APPLICATION_CREDENTIALS"):
+        try:
+            from google.cloud import storage
+            client = storage.Client()
+            bucket = client.bucket(GCS_BUCKET)
+            blob = bucket.blob(MODEL_KEY)
+            blob.download_to_filename(MODEL_PATH)
+            print(f"[SERVE] Model downloaded successfully from GCS (bucket: {GCS_BUCKET}) to {MODEL_PATH}")
+            return
+        except Exception as e:
+            print(f"[SERVE] GCS download attempt failed: {e}")
 
-    pass  # xoa dong nay sau khi hoan thanh tat ca TODO ben tren
+    # 3. Fallback: Kiem tra neu model da co san tai MODEL_PATH hoac FALLBACK_LOCAL_PATH
+    if os.path.exists(MODEL_PATH):
+        print(f"[SERVE] Using existing model file at {MODEL_PATH}")
+    elif os.path.exists(FALLBACK_LOCAL_PATH):
+        print(f"[SERVE] Using local fallback model file at {FALLBACK_LOCAL_PATH}")
+    else:
+        print(f"[SERVE] Warning: No model file found yet at {MODEL_PATH} or {FALLBACK_LOCAL_PATH}")
 
 
+# Khoi dong va load model khi module duoc nap
 download_model()
-model = joblib.load(MODEL_PATH)
+
+model = None
+if os.path.exists(MODEL_PATH):
+    model = joblib.load(MODEL_PATH)
+elif os.path.exists(FALLBACK_LOCAL_PATH):
+    model = joblib.load(FALLBACK_LOCAL_PATH)
 
 
 class PredictRequest(BaseModel):
@@ -47,11 +81,8 @@ def health():
     """
     Endpoint kiem tra suc khoe server.
     GitHub Actions goi endpoint nay sau khi deploy de xac nhan server dang chay.
-
-    Tra ve: {"status": "ok"}
     """
-    # TODO 5: Tra ve dict {"status": "ok"}
-    pass  # xoa dong nay sau khi hoan thanh
+    return {"status": "ok"}
 
 
 @app.post("/predict")
@@ -62,22 +93,33 @@ def predict(req: PredictRequest):
     Dau vao : JSON {"features": [f1, f2, ..., f12]}
     Dau ra  : JSON {"prediction": <0|1|2>, "label": <"thap"|"trung_binh"|"cao">}
 
-    Thu tu 12 dac trung (khop voi thu tu trong FEATURE_NAMES cua test):
+    Thu tu 12 dac trung:
         fixed_acidity, volatile_acidity, citric_acid, residual_sugar,
         chlorides, free_sulfur_dioxide, total_sulfur_dioxide, density,
         pH, sulphates, alcohol, wine_type
     """
-    # TODO 6: Kiem tra so luong dac trung.
-    # Neu len(req.features) != 12, raise HTTPException(status_code=400, ...)
+    global model
+    if model is None:
+        if os.path.exists(MODEL_PATH):
+            model = joblib.load(MODEL_PATH)
+        elif os.path.exists(FALLBACK_LOCAL_PATH):
+            model = joblib.load(FALLBACK_LOCAL_PATH)
+        else:
+            raise HTTPException(status_code=503, detail="Model is not loaded or not found")
 
-    # TODO 7: Goi model.predict([req.features]) de lay ket qua du doan.
-    # pred = model.predict(...)
+    if len(req.features) != 12:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Expected 12 features (wine quality), got {len(req.features)}",
+        )
 
-    # TODO 8: Tra ve dict chua "prediction" (int) va "label" (string).
-    # Nhan tuong ung: 0 -> "thap", 1 -> "trung_binh", 2 -> "cao"
-    # return {"prediction": ..., "label": ...}
+    preds = model.predict([req.features])
+    prediction = int(preds[0])
 
-    pass  # xoa dong nay sau khi hoan thanh tat ca TODO ben tren
+    label_mapping = {0: "thap", 1: "trung_binh", 2: "cao"}
+    label = label_mapping.get(prediction, "unknown")
+
+    return {"prediction": prediction, "label": label}
 
 
 if __name__ == "__main__":

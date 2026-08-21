@@ -1,0 +1,7 @@
+[core]
+    remote = myremote
+['remote "myremote"']
+    url = s3://AIinAction/dvc
+    endpointurl = https://axc8ef7fwayz.compat.objectstorage.ap-singapore-1.oraclecloud.com
+    access_key_id = faa54f4d86e3660c732d5c68d5c24e7155a6bc6d
+    region = ap-singapore-1

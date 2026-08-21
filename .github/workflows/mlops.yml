@@ -31,8 +31,7 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Run unit tests
-        # TODO 1: Viet lenh de chay pytest tren thu muc tests/ voi co -v
-        run: # <dien lenh o day>
+        run: pytest tests/ -v
 
 
   # ---------------------------------------------------------------------------
@@ -46,6 +45,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       accuracy: ${{ steps.read_metrics.outputs.accuracy }}
+      prev_accuracy: ${{ steps.check_rollback.outputs.prev_accuracy }}
 
     steps:
       - uses: actions/checkout@v4
@@ -57,54 +57,180 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Authenticate to Cloud Storage
-        # TODO 2: Ghi noi dung credentials ra file tam va set bien moi truong xac thuc.
-        # GCP:   echo '${{ secrets.CLOUD_CREDENTIALS }}' > /tmp/sa-key.json
-        #        echo "GOOGLE_APPLICATION_CREDENTIALS=/tmp/sa-key.json" >> $GITHUB_ENV
-        # AWS:   echo "AWS_ACCESS_KEY_ID=..." >> $GITHUB_ENV  (lay tu secrets)
-        #        echo "AWS_SECRET_ACCESS_KEY=..." >> $GITHUB_ENV
-        # Azure: echo "AZURE_STORAGE_CONNECTION_STRING=..." >> $GITHUB_ENV
+      - name: Authenticate to Cloud Storage & MLflow
+        env:
+          CLOUD_CREDENTIALS: ${{ secrets.CLOUD_CREDENTIALS }}
+          CLOUD_BUCKET: ${{ secrets.CLOUD_BUCKET }}
+          S3_ENDPOINT_URL: ${{ secrets.S3_ENDPOINT_URL }}
+          DAGSHUB_TOKEN: ${{ secrets.DAGSHUB_TOKEN }}
+          DAGSHUB_USER: ${{ secrets.DAGSHUB_USER }}
+          DAGSHUB_REPO: ${{ secrets.DAGSHUB_REPO }}
         run: |
-          # <dien code o day>
+          # 1. Google Cloud Storage Service Account JSON
+          if echo "$CLOUD_CREDENTIALS" | grep -q '"type": *"service_account"'; then
+            echo "$CLOUD_CREDENTIALS" > /tmp/sa-key.json
+            echo "GOOGLE_APPLICATION_CREDENTIALS=/tmp/sa-key.json" >> $GITHUB_ENV
+            echo "GCP authentication configured."
+          fi
 
-      - name: Pull data with DVC
-        # TODO 3: Pull cac file du lieu can thiet tu cloud storage bang lenh dvc pull.
-        #         Chi pull train_phase1.csv va eval.csv (khong can train_phase2.csv).
-        run: # <dien lenh o day>
+          # 2. AWS / S3 / OCI Credentials (JSON or Key format)
+          if echo "$CLOUD_CREDENTIALS" | grep -q '"aws_access_key_id"'; then
+            AWS_KEY=$(python -c "import json, os; d=json.loads(os.environ['CLOUD_CREDENTIALS']); print(d.get('aws_access_key_id',''))")
+            AWS_SEC=$(python -c "import json, os; d=json.loads(os.environ['CLOUD_CREDENTIALS']); print(d.get('aws_secret_access_key',''))")
+            echo "AWS_ACCESS_KEY_ID=$AWS_KEY" >> $GITHUB_ENV
+            echo "AWS_SECRET_ACCESS_KEY=$AWS_SEC" >> $GITHUB_ENV
+            echo "AWS/OCI S3 credentials parsed from JSON."
+          fi
+
+          # 3. Optional S3 endpoint for OCI / MinIO
+          if [ -n "$S3_ENDPOINT_URL" ]; then
+            echo "AWS_ENDPOINT_URL=$S3_ENDPOINT_URL" >> $GITHUB_ENV
+            echo "S3_ENDPOINT_URL=$S3_ENDPOINT_URL" >> $GITHUB_ENV
+          fi
+
+          # 4. Optional Remote MLflow tracking on DagsHub (Bonus 1)
+          if [ -n "$DAGSHUB_TOKEN" ] && [ -n "$DAGSHUB_USER" ] && [ -n "$DAGSHUB_REPO" ]; then
+            echo "MLFLOW_TRACKING_URI=https://dagshub.com/$DAGSHUB_USER/$DAGSHUB_REPO.mlflow" >> $GITHUB_ENV
+            echo "MLFLOW_TRACKING_USERNAME=$DAGSHUB_USER" >> $GITHUB_ENV
+            echo "MLFLOW_TRACKING_PASSWORD=$DAGSHUB_TOKEN" >> $GITHUB_ENV
+            echo "Configured remote MLflow tracking on DagsHub (Bonus 1)."
+          else
+            echo "MLFLOW_TRACKING_URI=sqlite:///mlflow.db" >> $GITHUB_ENV
+          fi
+
+      - name: Pull data with DVC & Cloud Storage
+        env:
+          CLOUD_BUCKET: ${{ secrets.CLOUD_BUCKET }}
+          S3_ENDPOINT_URL: ${{ secrets.S3_ENDPOINT_URL }}
+        run: |
+          # 1. Thu pull bang DVC
+          dvc pull data/train_phase1.csv.dvc data/eval.csv.dvc || true
+
+          # 2. Dam bao file du lieu ton tai tu Cloud Storage
+          python - <<'EOF'
+          import os
+          need_pull = not (os.path.exists("data/train_phase1.csv") and os.path.exists("data/eval.csv"))
+          if need_pull:
+              print("Pulling datasets from Cloud Storage bucket via SDK...")
+              bucket = os.environ.get("CLOUD_BUCKET")
+              s3_endpoint = os.environ.get("S3_ENDPOINT_URL") or os.environ.get("AWS_ENDPOINT_URL")
+              aws_key = os.environ.get("AWS_ACCESS_KEY_ID")
+              aws_sec = os.environ.get("AWS_SECRET_ACCESS_KEY")
+              if bucket and (aws_key or s3_endpoint):
+                  import boto3
+                  s3 = boto3.client("s3", endpoint_url=s3_endpoint, aws_access_key_id=aws_key, aws_secret_access_key=aws_sec)
+                  os.makedirs("data", exist_ok=True)
+                  for fname in ["train_phase1.csv", "eval.csv"]:
+                      try:
+                          s3.download_file(bucket, f"data/{fname}", f"data/{fname}")
+                          print(f"Downloaded data/{fname} from S3/OCI bucket {bucket}")
+                      except Exception as e:
+                          print(f"Error downloading data/{fname}: {e}")
+          EOF
 
       - name: Train model
+
         run: python src/train.py
 
       - name: Read metrics
         id: read_metrics
-        # TODO 4: Doc gia tri "accuracy" tu outputs/metrics.json bang Python inline.
-        #         Set ket qua thanh output "accuracy" de job deploy co the doc.
-        #
-        # Goi y:
-        #   ACC=$(python -c "import json; d=json.load(open('outputs/metrics.json')); print(d['accuracy'])")
-        #   echo "accuracy=$ACC" >> $GITHUB_OUTPUT
         run: |
-          # <dien code o day>
+          ACC=$(python -c "import json; d=json.load(open('outputs/metrics.json')); print(d['accuracy'])")
+          echo "accuracy=$ACC" >> $GITHUB_OUTPUT
+          echo "Model Accuracy: $ACC"
 
-      - name: Upload model to Cloud Storage
-        # TODO 5: Su dung cloud SDK de upload models/model.pkl len
-        #         <bucket>/models/latest/model.pkl.
-        #         Ten bucket lay tu secret CLOUD_BUCKET.
+      - name: Check previous model for rollback guard (Bonus 4)
+        id: check_rollback
+        env:
+          CLOUD_BUCKET: ${{ secrets.CLOUD_BUCKET }}
+          S3_ENDPOINT_URL: ${{ secrets.S3_ENDPOINT_URL }}
         run: |
           python - <<'EOF'
-          # <dien code Python o day>
+          import os, json
+
+          prev_acc = "none"
+          bucket = os.environ.get("CLOUD_BUCKET")
+          s3_endpoint = os.environ.get("S3_ENDPOINT_URL") or os.environ.get("AWS_ENDPOINT_URL")
+          aws_key = os.environ.get("AWS_ACCESS_KEY_ID")
+          aws_sec = os.environ.get("AWS_SECRET_ACCESS_KEY")
+          gcs_creds = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+
+          if bucket and (aws_key or s3_endpoint):
+              try:
+                  import boto3
+                  s3 = boto3.client("s3", endpoint_url=s3_endpoint, aws_access_key_id=aws_key, aws_secret_access_key=aws_sec)
+                  resp = s3.get_object(Bucket=bucket, Key="models/latest/metrics.json")
+                  prev_metrics = json.loads(resp["Body"].read().decode("utf-8"))
+                  prev_acc = str(prev_metrics.get("accuracy", "none"))
+                  print(f"[BONUS 4] Found previous model metrics from S3. Previous accuracy: {prev_acc}")
+              except Exception as e:
+                  print(f"[BONUS 4] No previous metrics found in S3 (first run or error: {e})")
+
+          elif bucket and gcs_creds:
+              try:
+                  from google.cloud import storage
+                  client = storage.Client()
+                  b = client.bucket(bucket)
+                  blob = b.blob("models/latest/metrics.json")
+                  if blob.exists():
+                      prev_metrics = json.loads(blob.download_as_text())
+                      prev_acc = str(prev_metrics.get("accuracy", "none"))
+                      print(f"[BONUS 4] Found previous model metrics from GCS. Previous accuracy: {prev_acc}")
+              except Exception as e:
+                  print(f"[BONUS 4] No previous metrics found in GCS: {e}")
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"prev_accuracy={prev_acc}\n")
           EOF
 
-      - name: Save metrics as artifact
+      - name: Upload model & metrics to Cloud Storage
+        env:
+          CLOUD_BUCKET: ${{ secrets.CLOUD_BUCKET }}
+          S3_ENDPOINT_URL: ${{ secrets.S3_ENDPOINT_URL }}
+        run: |
+          python - <<'EOF'
+          import os
+
+          bucket = os.environ.get("CLOUD_BUCKET")
+          if not bucket:
+              print("Warning: CLOUD_BUCKET secret not set, skipping remote upload.")
+              exit(0)
+
+          s3_endpoint = os.environ.get("S3_ENDPOINT_URL") or os.environ.get("AWS_ENDPOINT_URL")
+          aws_key = os.environ.get("AWS_ACCESS_KEY_ID")
+          aws_sec = os.environ.get("AWS_SECRET_ACCESS_KEY")
+          gcs_creds = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+
+          # S3 / OCI Object Storage
+          if aws_key or s3_endpoint:
+              import boto3
+              s3 = boto3.client("s3", endpoint_url=s3_endpoint, aws_access_key_id=aws_key, aws_secret_access_key=aws_sec)
+              s3.upload_file("models/model.pkl", bucket, "models/latest/model.pkl")
+              s3.upload_file("outputs/metrics.json", bucket, "models/latest/metrics.json")
+              print(f"Uploaded model.pkl and metrics.json to S3/OCI bucket: {bucket}/models/latest/")
+
+          # GCP Storage
+          elif gcs_creds:
+              from google.cloud import storage
+              client = storage.Client()
+              b = client.bucket(bucket)
+              b.blob("models/latest/model.pkl").upload_from_filename("models/model.pkl")
+              b.blob("models/latest/metrics.json").upload_from_filename("outputs/metrics.json")
+              print(f"Uploaded model.pkl and metrics.json to GCS bucket: {bucket}/models/latest/")
+          EOF
+
+      - name: Save metrics and performance report as artifacts (Bonus 3)
         uses: actions/upload-artifact@v4
         with:
-          name: metrics
-          path: outputs/metrics.json
+          name: performance-report
+          path: |
+            outputs/metrics.json
+            outputs/report.txt
 
 
   # ---------------------------------------------------------------------------
   # JOB 3 - EVAL
-  # Kiem tra nguong chat luong (accuracy >= 0.70).
+  # Kiem tra nguong chat luong (accuracy >= 0.70) va Rollback gate (Bonus 4).
   # Pipeline dung lai o day neu mo hinh chua dat yeu cau.
   # Chi chay khi Job 2 (Train) hoan thanh thanh cong.
   # ---------------------------------------------------------------------------
@@ -114,19 +240,32 @@ jobs:
     runs-on: ubuntu-latest
     steps:
 
-      - name: Check eval gate
-        # TODO 6: Doc accuracy tu output cua job train.
-        #         Neu accuracy < 0.70, ket thuc voi loi ro rang.
-        #         Neu dat nguong, in thong bao va tiep tuc.
-        #
-        # Goi y:
-        #   acc = float("${{ needs.train.outputs.accuracy }}")
-        #   if acc < 0.70:
-        #       raise SystemExit(f"FAILED: accuracy {acc:.4f} < 0.70. Huy deploy.")
-        #   print("PASSED: dang trien khai model.")
+      - name: Check eval gate & rollback guard (Bonus 4)
         run: |
           python - <<'EOF'
-          # <dien code Python o day>
+          acc_str = "${{ needs.train.outputs.accuracy }}"
+          prev_acc_str = "${{ needs.train.outputs.prev_accuracy }}"
+
+          if not acc_str:
+              raise SystemExit("ERROR: Accuracy output is missing from train job.")
+
+          acc = float(acc_str)
+          print(f"[EVAL GATE] Model accuracy: {acc:.4f} (Threshold: 0.7000)")
+
+          # 1. Kiem tra nguong toi thieu 0.70
+          if acc < 0.70:
+              raise SystemExit(f"FAILED: accuracy {acc:.4f} < 0.70. Huy deploy.")
+
+          # 2. Bonus 4: Hoan tra ve phien ban truoc neu accuracy moi thap hon accuracy cu
+          if prev_acc_str and prev_acc_str != "none":
+              prev_acc = float(prev_acc_str)
+              print(f"[BONUS 4 ROLLBACK GUARD] Previous accuracy: {prev_acc:.4f} | New accuracy: {acc:.4f}")
+              if acc < prev_acc:
+                  raise SystemExit(f"FAILED (Bonus 4 Rollback Guard): New accuracy ({acc:.4f}) < Previous accuracy ({prev_acc:.4f}). Huy deploy.")
+              else:
+                  print(f"PASSED (Bonus 4): New model is equal or better ({acc:.4f} >= {prev_acc:.4f}).")
+
+          print("PASSED: Eval gate thanh cong, san sang deploy.")
           EOF
 
 
@@ -145,15 +284,13 @@ jobs:
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.VM_HOST }}
+          port: ${{ secrets.VM_PORT || 2205 }}
           username: ${{ secrets.VM_USER }}
           key: ${{ secrets.VM_SSH_KEY }}
           script: |
-            # TODO 7: Restart service mlops-serve tren VM.
-            # TODO 8: Cho server san sang roi goi curl /health de xac nhan.
-            #         Neu health check that bai sau nhieu lan thu, thoat voi exit 1.
-            #
-            # Goi y:
-            #   sudo systemctl restart mlops-serve
-            #   sleep 5
-            #   curl -sf http://localhost:8000/health && echo "Health check passed." || exit 1
-            # <dien lenh bash o day>
+            echo "Deploying latest model on VM..."
+            sudo systemctl restart mlops-serve || systemctl restart mlops-serve
+            sleep 5
+            curl -sf http://localhost:8000/health && echo "Health check passed." || exit 1
+
+
