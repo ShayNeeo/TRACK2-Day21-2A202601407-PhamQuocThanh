@@ -7,7 +7,7 @@
 | :--- | :--- |
 | **Khóa học** | **AI in Action (K3) — VinUniversity** |
 | **Chủ đề** | **Day 21: MLOps CI/CD & Continuous Training Pipeline** |
-| **Học viên** | **Phạm Quốc Thành** |
+| **Học viên** | **Phạm Quốc Thanh** |
 | **Mã học viên** | **2A202601407** |
 | **GitHub Repository** | [https://github.com/ShayNeeo/TRACK2-Day21-2A202601407-PhamQuocThanh](https://github.com/ShayNeeo/TRACK2-Day21-2A202601407-PhamQuocThanh) |
 | **Inference Server (VM)** | `http://sgp1.w9.nu:8000` (SSH: `sgp1.w9.nu:2205`) |

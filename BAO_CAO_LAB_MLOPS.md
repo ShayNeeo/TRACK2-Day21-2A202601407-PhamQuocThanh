@@ -2,7 +2,7 @@
 
 **Khóa học:** AI in Action - VinUni (Khóa K3)  
 **Buổi học:** Day 21 - CI/CD cho AI Systems  
-**Học viên:** Phạm Quốc Thành — **Mã học viên:** 2A202601407  
+**Học viên:** Phạm Quốc Thanh — **Mã học viên:** 2A202601407  
 **GitHub Repository:** [https://github.com/ShayNeeo/TRACK2-Day21-2A202601407-PhamQuocThanh](https://github.com/ShayNeeo/TRACK2-Day21-2A202601407-PhamQuocThanh)  
 **Inference Server:** `http://sgp1.w9.nu:8000` (SSH: `sgp1.w9.nu:2205`)  
 **Cloud Storage:** Oracle Cloud Infrastructure S3 Object Storage (`AIinAction` Bucket, Region `ap-singapore-1`)
